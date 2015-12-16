@@ -1,0 +1,233 @@
+%{?scl:%scl_package tbb}
+%{!?scl:%global pkg_name %{name}}
+
+%define releasedate 20130314
+%define major 4
+%define minor 1
+%define update 3
+%define dotver %{major}.%{minor}
+%define sourcebasename tbb%{major}%{minor}_%{releasedate}oss
+
+%define sourcefilename %{sourcebasename}_src.tgz
+
+Summary: The Threading Building Blocks library abstracts low-level threading details
+Name: %{?scl_prefix}tbb
+Version: %{dotver}
+Release: 8.%{releasedate}.sc1%{?dist}
+License: GPLv2 with exceptions
+Group: Development/Tools
+URL: http://threadingbuildingblocks.org/
+Source0: http://threadingbuildingblocks.org/sites/default/files/software_releases/source/tbb41_20130314oss_src.tgz
+
+# These two are downstream sources.
+Source6: tbb.pc
+Source7: tbbmalloc.pc
+Source8: tbbmalloc_proxy.pc
+
+# Propagate CXXFLAGS variable into flags used when compiling C++.
+# This so that RPM_OPT_FLAGS are respected.
+Patch1: tbb-3.0-cxxflags.patch
+
+# Replace mfence with xchg (for 32-bit builds only) so that TBB
+# compiles and works supported hardware.  mfence was added with SSE2,
+# which we still don't assume.
+Patch2: tbb-4.0-mfence.patch
+
+BuildRoot: %{_tmppath}/%{pkg_name}-%{version}-%{release}-root-%(%{__id_u} -n)
+# build inside collection
+%{?scl:BuildRequires: %{?scl_prefix}python-devel}
+# runtime-depend on collection
+%{?scl:Requires: %{scl}-runtime}
+BuildRequires: libstdc++-devel
+
+%description
+Threading Building Blocks (TBB) is a C++ runtime library that
+abstracts the low-level threading details necessary for optimal
+multi-core performance.  It uses common C++ templates and coding style
+to eliminate tedious threading implementation work.
+
+TBB requires fewer lines of code to achieve parallelism than other
+threading models.  The applications you write are portable across
+platforms.  Since the library is also inherently scalable, no code
+maintenance is required as more processor cores become available.
+
+%package devel
+Summary: The Threading Building Blocks C++ headers and shared development libraries
+Group: Development/Libraries
+Requires: %{?scl_prefix}%{pkg_name}%{?_isa} = %{version}-%{release}
+
+%description devel
+Header files and shared object symlinks for the Threading Building
+Blocks (TBB) C++ libraries.
+
+%package doc
+Summary: The Threading Building Blocks documentation
+Group: Documentation
+
+%description doc
+PDF documentation for the user of the Threading Building Block (TBB)
+C++ library.
+
+%prep
+%setup -q -c -n %{name}
+cd %{sourcebasename}
+%patch1 -p1
+%patch2 -p1
+
+%build
+cd %{sourcebasename}
+%{?scl:scl enable %{scl} - << \EOF}
+make %{?_smp_mflags} CXXFLAGS="$RPM_OPT_FLAGS" tbb_build_prefix=obj
+%{?scl:EOF}
+for file in %{SOURCE6} %{SOURCE7} %{SOURCE8}; do
+    sed 's/_FEDORA_VERSION/%{major}.%{minor}.%{update}/' ${file} \
+        > $(basename ${file})
+done
+
+%install
+rm -rf $RPM_BUILD_ROOT
+cd %{sourcebasename}
+mkdir -p $RPM_BUILD_ROOT/%{_libdir}
+mkdir -p $RPM_BUILD_ROOT/%{_includedir}
+
+pushd build/obj_release
+    for file in libtbb{,malloc{,_proxy}}; do
+        install -p -D -m 755 ${file}.so.2 $RPM_BUILD_ROOT/%{_libdir}
+        ln -s $file.so.2 $RPM_BUILD_ROOT/%{_libdir}/$file.so
+    done
+popd
+
+pushd include
+    find tbb -type f ! -name \*.htm\* -exec \
+        install -p -D -m 644 {} $RPM_BUILD_ROOT/%{_includedir}/{} \
+    \;
+popd
+
+for file in %{SOURCE6} %{SOURCE7} %{SOURCE8}; do
+    install -p -D -m 644 $(basename ${file}) \
+	$RPM_BUILD_ROOT/%{_libdir}/pkgconfig/$(basename ${file})
+done
+
+%post -p /sbin/ldconfig
+
+%postun -p /sbin/ldconfig
+
+%files
+%defattr(-,root,root,-)
+%doc %{sourcebasename}/COPYING %{sourcebasename}/doc/Release_Notes.txt
+%{_libdir}/*.so.2
+
+%files devel
+%defattr(-,root,root,-)
+%doc %{sourcebasename}/CHANGES
+%{_includedir}/tbb
+%{_libdir}/*.so
+%{_libdir}/pkgconfig/*.pc
+
+%files doc
+%defattr(-,root,root,-)
+%doc %{sourcebasename}/doc/Release_Notes.txt
+%doc %{sourcebasename}/doc/html
+
+%changelog
+* Mon Mar 31 2014 Tomas Tomecek <ttomecek@redhat.com> - 4.1-8.20130314
+- explicitly require SCL runtime
+
+* Thu Mar 20 2014 Tomas Tomecek <ttomecek@redhat.com> - 4.1-7.20130314
+- rebuilt with latest scl-utils (dependencies problems)
+
+* Tue Jan 28 2014 Tomas Tomecek <ttomecek@redhat.com> - 4.1-6.20130314
+- fix debuginfo conflicts rhbz#1041463
+
+* Wed Nov 13 2013 Tomas Tomecek <ttomecek@redhat.com> - 4.1-5.20130314
+- RHSCL-1.1 build
+
+* Thu Oct  3 2013 Petr Machata <pmachata@redhat.com> - 4.1-4.20130314
+- Fix %%install to also install include files that are not named *.h
+
+* Tue May 28 2013 Petr Machata <pmachata@redhat.com> - 4.1-3.20130314
+- Enable ARM arches
+
+* Wed May 22 2013 Petr Machata <pmachata@redhat.com> - 4.1-2.20130314
+- Fix mfence patch.  Since the __TBB_full_memory_fence macro was
+  function-call-like, it stole () intended for function invocation.
+
+* Wed May 22 2013 Petr Machata <pmachata@redhat.com> - 4.1-1.20130314
+- Rebase to 4.1 update 3
+
+* Fri Feb 15 2013 Fedora Release Engineering <rel-eng@lists.fedoraproject.org> - 4.0-7.20120408
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_19_Mass_Rebuild
+
+* Tue Aug 28 2012 Petr Machata <pmachata@redhat.com> - 4.0-6.20120408
+- Fix build on PowerPC
+
+* Sat Jul 21 2012 Fedora Release Engineering <rel-eng@lists.fedoraproject.org> - 4.0-5.20120408
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_18_Mass_Rebuild
+
+* Thu Jun  7 2012 Petr Machata <pmachata@redhat.com> - 4.0-4.20120408
+- Rebase to 4.0 update 4
+- Refresh Getting_Started.pdf, Reference.pdf, Tutorial.pdf
+- Provide pkg-config files
+- Resolves: #825402
+
+* Thu Apr 05 2012 Karsten Hopp <karsten@redhat.com> 4.0-3.20110809
+- tbb builds now on PPC(64)
+
+* Sat Jan 14 2012 Fedora Release Engineering <rel-eng@lists.fedoraproject.org> - 4.0-2.20110809
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_17_Mass_Rebuild
+
+* Tue Oct 18 2011 Petr Machata <pmachata@redhat.com> - 4.0-1.20110809
+- Rebase to 4.0
+  - Port the mfence patch
+  - Refresh the documentation bundle
+
+* Tue Jul 26 2011 Petr Machata <pmachata@redhat.com> - 3.0-1.20110419
+- Rebase to 3.0-r6
+  - Port both patches
+  - Package Design_Patterns.pdf
+  - Thanks to Richard Shaw for initial rebase patch
+- Resolves: #723043
+
+* Wed Feb 09 2011 Fedora Release Engineering <rel-eng@lists.fedoraproject.org> - 2.2-3.20090809
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_15_Mass_Rebuild
+
+* Thu Jun 10 2010 Petr Machata <pmachata@redhat.com> - 2.2-2.20090809
+- Replace mfence instruction with xchg to make it run on ia32-class
+  machines without SSE2.
+- Resolves: #600654
+
+* Tue Nov  3 2009 Petr Machata <pmachata@redhat.com> - 2.2-1.20090809
+- New upstream 2.2
+- Resolves: #521571
+
+* Sun Jul 26 2009 Fedora Release Engineering <rel-eng@lists.fedoraproject.org> - 2.1-3.20080605
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_12_Mass_Rebuild
+
+* Wed Feb 25 2009 Fedora Release Engineering <rel-eng@lists.fedoraproject.org> - 2.1-2.20080605
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_11_Mass_Rebuild
+
+* Fri Jun 13 2008 Petr Machata <pmachata@redhat.com> - 2.1-1.20080605
+- New upstream 2.1
+  - Drop soname patch, parallel make patch, and GCC 4.3 patch
+
+* Wed Feb 13 2008 Petr Machata <pmachata@redhat.com> - 2.0-4.20070927
+- Review fixes
+  - Use updated URL
+  - More timestamp preservation
+- Initial import into Fedora CVS
+
+* Mon Feb 11 2008 Petr Machata <pmachata@redhat.com> - 2.0-3.20070927
+- Review fixes
+  - Preserve timestamp of installed files
+  - Fix soname not to contain "debug"
+
+* Tue Feb  5 2008 Petr Machata <pmachata@redhat.com> - 2.0-2.20070927
+- Review fixes
+  - GCC 4.3 patchset
+  - Add BR util-linux net-tools
+  - Add full URL to Source0
+  - Build in debug mode to work around problems with GCC 4.3
+
+* Mon Dec 17 2007 Petr Machata <pmachata@redhat.com> - 2.0-1.20070927
+- Initial package.
+- Using SONAME patch from Debian.
